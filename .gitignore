@@ -10,3 +10,4 @@ __pycache__/
 explore_datasets.py
 explore.py
 explore2.py
+checkpoints/
