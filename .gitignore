@@ -1,2 +1,12 @@
 dataset.vhdx
 DL_Project_Proposal.pdf
+.env
+.agent/
+.vscode/
+.aiexclude
+torch-env/
+splits/
+__pycache__/
+explore_datasets.py
+explore.py
+explore2.py
