@@ -63,3 +63,5 @@ segmentation-models-pytorch
 scikit-image
 arabic-reshaper
 python-bidi
+pytesseract
+jiwer

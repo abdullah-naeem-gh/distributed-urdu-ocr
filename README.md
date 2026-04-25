@@ -10,7 +10,7 @@ The system is trained on a combination of printed Nastaleeq text (`MMU-OCR-21`) 
 - **Phase 1: Data Preprocessing & Pipeline Construction** — **[COMPLETED]**
 - **Phase 2: Deep Learning Image Restoration (U-Net)** — **[COMPLETED]**
 - **Phase 3: Deep Learning OCR (Conv-Transformer)** — **[COMPLETED]**
-- **Phase 4: Pipeline Integration, Metrics & Visualization** — *[PENDING]*
+- **Phase 4: Pipeline Integration, Metrics & Visualization** — **[COMPLETED]**
 - **Phase 5: Real-world Application / Deployment** — *[PENDING]*
 
 ---
@@ -56,6 +56,16 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 pip install -r requirements.txt
 ```
 
+### Optional: Install Tesseract OCR (Urdu) for baseline comparison
+`benchmark.py` compares this project against Tesseract (`pytesseract`, language code `urd`).  
+To install Tesseract and ensure the Urdu language pack is present, run the included Windows script from the project root:
+
+```powershell
+.\install_tesseract_urdu.bat
+```
+
+If the script reports `urd` in `tesseract --list-langs`, the Tesseract baseline is ready for comparison.
+
 ### Optional: Jupyter Notebook Kernel
 If you plan to run or modify the `project-notebook.ipynb`, you can register the environment as a Jupyter kernel:
 ```bash
@@ -74,11 +84,14 @@ python -m ipykernel install --user --name=torch-env --display-name "Python (torc
 │   ├── vocab.py               # Vocabulary builder and tokenization
 │   ├── restoration_model.py   # U-Net architecture & builder
 │   ├── ocr_model.py           # CNN + Transformer architecture
-│   └── ocr_trainer.py         # Custom training loops & weighted loss
+│   ├── ocr_trainer.py         # Custom training loops & weighted loss
+│   └── pipeline.py            # End-to-End inference pipeline wrapper
 ├── datasets/
 │   ├── restoration_dataset.py # On-the-fly degradation dataloader
 │   └── ocr_dataset.py         # Sequence padding & source-weight dataloader
 ├── preprocessing.py           # Standardization and augmentation pipelines
+├── benchmark.py               # Benchmarking script to evaluate CER/WER against Tesseract
+├── install_tesseract_urdu.bat # Installs Tesseract + Urdu language pack for baseline comparison
 ├── project-notebook.ipynb     # Main orchestrator for training & visualization
 └── requirements.txt           # Dependencies
 ```
@@ -86,4 +99,4 @@ python -m ipykernel install --user --name=torch-env --display-name "Python (torc
 ---
 
 ## 📌 Next Steps
-With Phases 1-3 complete, the upcoming objectives are **Phase 4** (benchmarking against tools like Tesseract and computing final end-to-end Character/Word Error Rates) and **Phase 5** (wrapping the dual-model pipeline into a FastAPI deployment).
+With Phases 1-4 complete, the upcoming objective is **Phase 5** (wrapping the dual-model pipeline into a FastAPI deployment and setting up distributed processing scaling).
