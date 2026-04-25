@@ -25,40 +25,43 @@ from sklearn.model_selection import train_test_split
 # 1. Dataset Discovery
 # ---------------------------------------------------------------------------
 
+
 def discover_mmu_ocr21(dataset_root: str, level: str = "TextLines") -> List[Dict]:
     """
     Walk MMU-OCR-21 and return a list of dicts:
       {"image_path": str, "label": str, "source": "MMU-OCR-21", "font": "Nastaleeq"}
     """
     base = Path(dataset_root) / "MMU-OCR-21"
-    
+
     # Map levels to their exact Nastaleeq paths
     level_map = {
         "textlines": {
             "img_dir": base / "TextLines" / "SentenceImages" / "Nastaleeq",
-            "csv_path": base / "TextLines" / "UrduTextLineNastaleeqOutput.csv"
+            "csv_path": base / "TextLines" / "UrduTextLineNastaleeqOutput.csv",
         },
         "words": {
             "img_dir": base / "Words" / "WordImages" / "Nastaleeq",
-            "csv_path": base / "Words" / "UrduWordsNastaleeqOutput.csv"
+            "csv_path": base / "Words" / "UrduWordsNastaleeqOutput.csv",
         },
         "characters": {
             "img_dir": base / "Characters" / "CharacterImages" / "Nastaleeq",
-            "csv_path": base / "Characters" / "UrduCharactersNastaleeqOutput.csv"
-        }
+            "csv_path": base / "Characters" / "UrduCharactersNastaleeqOutput.csv",
+        },
     }
-    
+
     level_lower = level.lower()
     if level_lower not in level_map:
-        raise ValueError(f"Unknown level: {level}. Choose from TextLines, Words, Characters.")
-        
+        raise ValueError(
+            f"Unknown level: {level}. Choose from TextLines, Words, Characters."
+        )
+
     paths = level_map[level_lower]
     img_dir = paths["img_dir"]
     csv_path = paths["csv_path"]
 
     if not img_dir.exists():
         raise FileNotFoundError(f"Nastaleeq image directory not found: {img_dir}")
-        
+
     gt_map: Dict[str, str] = {}
     if csv_path.exists():
         try:
@@ -68,34 +71,64 @@ def discover_mmu_ocr21(dataset_root: str, level: str = "TextLines") -> List[Dict
                 df = pd.read_csv(csv_path, encoding="utf-8-sig", on_bad_lines="skip")
             except Exception:
                 df = pd.DataFrame()
-                
+
         if not df.empty:
             df.columns = [c.strip().lower() for c in df.columns]
-            fname_col = next((c for c in df.columns if c in ("filename", "image", "file", "img", "image_name")), None)
-            label_col = next((c for c in df.columns if c in ("text", "label", "ground_truth", "gt", "transcription")), None)
+            # MMU CSVs use ImagePath for filename, and UrduLines/Word/Character for label
+            fname_col = next(
+                (
+                    c
+                    for c in df.columns
+                    if c in ("imagepath", "filename", "image", "file", "img", "image_name")
+                ),
+                None,
+            )
+            label_col = next(
+                (
+                    c
+                    for c in df.columns
+                    if c in ("urdulines", "word", "character", "text", "label",
+                             "ground_truth", "gt", "transcription")
+                ),
+                None,
+            )
             if fname_col is None or label_col is None:
                 if len(df.columns) >= 2:
                     fname_col, label_col = df.columns[0], df.columns[1]
             if fname_col is not None and label_col is not None:
+                csv_dir = csv_path.parent
                 for _, row in df.iterrows():
-                    key = str(row[fname_col]).strip()
-                    gt_map[key] = str(row[label_col]).strip()
+                    raw_path = str(row[fname_col]).strip()
+                    # Resolve relative ImagePath (e.g. ./SentenceImages/...)
+                    resolved = (csv_dir / raw_path).resolve()
+                    # Store by filename for matching
+                    gt_map[resolved.name] = str(row[label_col]).strip()
+                    gt_map[resolved.stem] = str(row[label_col]).strip()
 
     records = []
     for img_file in img_dir.rglob("*"):
         if not img_file.is_file():
             continue
-        if img_file.suffix.lower() not in (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"):
+        if img_file.suffix.lower() not in (
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".bmp",
+            ".tif",
+            ".tiff",
+        ):
             continue
         fname = img_file.name
         stem = img_file.stem
         label = gt_map.get(fname) or gt_map.get(stem) or ""
-        records.append({
-            "image_path": str(img_file),
-            "label": label,
-            "source": "MMU-OCR-21",
-            "font": "Nastaleeq",
-        })
+        records.append(
+            {
+                "image_path": str(img_file),
+                "label": label,
+                "source": "MMU-OCR-21",
+                "font": "Nastaleeq",
+            }
+        )
 
     return records
 
@@ -106,35 +139,33 @@ def discover_uhwr(dataset_root: str) -> List[Dict]:
       {"image_path": str, "label": str, "source": "UHWR"}
 
     Expected layout:
-      <dataset_root>/UHWR/images/  (or similar)
-      <dataset_root>/UHWR/*.csv    (ground truth)
+      <dataset_root>/UHWR/Dataset/images/  (image files)
+      <dataset_root>/UHWR/train.txt        (tab-separated: path\tlabel)
+      <dataset_root>/UHWR/val.txt
+      <dataset_root>/UHWR/test.txt
     """
     base = Path(dataset_root) / "UHWR"
     if not base.exists():
         raise FileNotFoundError(f"UHWR not found at {base}")
 
-    # Load CSVs for ground truth
+    # Load labels from tab-separated .txt files (train/val/test)
     gt_map: Dict[str, str] = {}
-    csv_files = list(base.glob("*.csv"))
-    for csv_path in csv_files:
-        try:
-            df = pd.read_csv(csv_path, encoding="utf-8", on_bad_lines="skip")
-        except Exception:
-            try:
-                df = pd.read_csv(csv_path, encoding="utf-8-sig", on_bad_lines="skip")
-            except Exception:
-                continue
-        df.columns = [c.strip().lower() for c in df.columns]
-        fname_col = next((c for c in df.columns if c in ("filename", "image", "file", "img", "image_name")), None)
-        label_col = next((c for c in df.columns if c in ("text", "label", "ground_truth", "gt", "transcription")), None)
-        if fname_col is None or label_col is None:
-            if len(df.columns) >= 2:
-                fname_col, label_col = df.columns[0], df.columns[1]
-            else:
-                continue
-        for _, row in df.iterrows():
-            key = str(row[fname_col]).strip()
-            gt_map[key] = str(row[label_col]).strip()
+    for txt_name in ["train.txt", "val.txt", "test.txt"]:
+        txt_path = base / txt_name
+        if not txt_path.exists():
+            continue
+        with open(txt_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or "\t" not in line:
+                    continue
+                parts = line.split("\t", 1)
+                rel_path = parts[0].strip()
+                label = parts[1].strip() if len(parts) > 1 else ""
+                # Resolve to absolute path
+                abs_path = (base / rel_path).resolve()
+                gt_map[abs_path.name] = label
+                gt_map[abs_path.stem] = label
 
     # Walk all image files under base
     records = []
@@ -145,11 +176,13 @@ def discover_uhwr(dataset_root: str) -> List[Dict]:
         fname = img_file.name
         stem = img_file.stem
         label = gt_map.get(fname) or gt_map.get(stem) or ""
-        records.append({
-            "image_path": str(img_file),
-            "label": label,
-            "source": "UHWR",
-        })
+        records.append(
+            {
+                "image_path": str(img_file),
+                "label": label,
+                "source": "UHWR",
+            }
+        )
 
     return records
 
@@ -157,6 +190,7 @@ def discover_uhwr(dataset_root: str) -> List[Dict]:
 # ---------------------------------------------------------------------------
 # 2. Image Standardization
 # ---------------------------------------------------------------------------
+
 
 def standardize_image(img: np.ndarray, target_height: int = 128) -> np.ndarray:
     """
@@ -182,9 +216,12 @@ def standardize_image(img: np.ndarray, target_height: int = 128) -> np.ndarray:
     return resized
 
 
-def standardize_and_pad(img: np.ndarray, target_height: int = 128,
-                        target_width: int = 512,
-                        pad_value: int = 255) -> np.ndarray:
+def standardize_and_pad(
+    img: np.ndarray,
+    target_height: int = 128,
+    target_width: int = 512,
+    pad_value: int = 255,
+) -> np.ndarray:
     """
     Standardize height, then pad (or crop) width to *target_width*.
     Padding is added on the LEFT side (since Urdu is RTL, the text
@@ -196,7 +233,7 @@ def standardize_and_pad(img: np.ndarray, target_height: int = 128,
     if w >= target_width:
         # Center-crop width
         start = (w - target_width) // 2
-        return resized[:, start:start + target_width]
+        return resized[:, start : start + target_width]
 
     # Pad on the left
     pad_left = target_width - w
@@ -209,14 +246,18 @@ def standardize_and_pad(img: np.ndarray, target_height: int = 128,
 # 3. Synthetic Degradation Pipeline
 # ---------------------------------------------------------------------------
 
-def apply_gaussian_blur(img: np.ndarray, ksize_range: Tuple[int, int] = (3, 7)) -> np.ndarray:
+
+def apply_gaussian_blur(
+    img: np.ndarray, ksize_range: Tuple[int, int] = (5, 9)
+) -> np.ndarray:
     """Apply random Gaussian blur."""
     k = random.choice(range(ksize_range[0], ksize_range[1] + 1, 2))  # must be odd
     return cv2.GaussianBlur(img, (k, k), 0)
 
 
-def apply_gaussian_noise(img: np.ndarray, mean: float = 0,
-                         std_range: Tuple[float, float] = (10, 40)) -> np.ndarray:
+def apply_gaussian_noise(
+    img: np.ndarray, mean: float = 0, std_range: Tuple[float, float] = (30, 60)
+) -> np.ndarray:
     """Add Gaussian noise."""
     std = random.uniform(*std_range)
     noise = np.random.normal(mean, std, img.shape).astype(np.float32)
@@ -224,8 +265,9 @@ def apply_gaussian_noise(img: np.ndarray, mean: float = 0,
     return noisy
 
 
-def apply_salt_pepper_noise(img: np.ndarray,
-                            amount_range: Tuple[float, float] = (0.01, 0.05)) -> np.ndarray:
+def apply_salt_pepper_noise(
+    img: np.ndarray, amount_range: Tuple[float, float] = (0.03, 0.1)
+) -> np.ndarray:
     """Add salt-and-pepper noise."""
     amount = random.uniform(*amount_range)
     noisy = img.copy()
@@ -240,9 +282,11 @@ def apply_salt_pepper_noise(img: np.ndarray,
     return noisy
 
 
-def apply_low_contrast(img: np.ndarray,
-                       alpha_range: Tuple[float, float] = (0.4, 0.7),
-                       beta_range: Tuple[int, int] = (30, 80)) -> np.ndarray:
+def apply_low_contrast(
+    img: np.ndarray,
+    alpha_range: Tuple[float, float] = (0.3, 0.6),
+    beta_range: Tuple[int, int] = (50, 100),
+) -> np.ndarray:
     """Simulate faded / low-contrast text."""
     alpha = random.uniform(*alpha_range)
     beta = random.randint(*beta_range)
@@ -250,16 +294,15 @@ def apply_low_contrast(img: np.ndarray,
     return faded
 
 
-def apply_affine_skew(img: np.ndarray,
-                      max_angle: float = 5.0) -> np.ndarray:
+def apply_affine_skew(img: np.ndarray, max_angle: float = 5.0) -> np.ndarray:
     """Apply a small affine skew/rotation."""
     h, w = img.shape[:2]
     angle = random.uniform(-max_angle, max_angle)
     center = (w // 2, h // 2)
     M = cv2.getRotationMatrix2D(center, angle, 1.0)
-    rotated = cv2.warpAffine(img, M, (w, h),
-                             borderMode=cv2.BORDER_CONSTANT,
-                             borderValue=255)
+    rotated = cv2.warpAffine(
+        img, M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=255
+    )
     return rotated
 
 
@@ -300,17 +343,21 @@ def degrade_image(img: np.ndarray, rng: Optional[random.Random] = None) -> np.nd
 # 4. Data Splitting (70 / 15 / 15)
 # ---------------------------------------------------------------------------
 
-def split_dataset(records: List[Dict],
-                  train_ratio: float = 0.70,
-                  val_ratio: float = 0.15,
-                  test_ratio: float = 0.15,
-                  seed: int = 42) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+
+def split_dataset(
+    records: List[Dict],
+    train_ratio: float = 0.70,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
+    seed: int = 42,
+) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
     Split records into train / val / test with deterministic seeding.
     Returns (train, val, test) lists.
     """
-    assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, \
-        "Ratios must sum to 1.0"
+    assert (
+        abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6
+    ), "Ratios must sum to 1.0"
 
     # First split: train vs (val+test)
     train, valtest = train_test_split(
@@ -324,7 +371,9 @@ def split_dataset(records: List[Dict],
     return train, val, test
 
 
-def assert_no_data_leakage(train: List[Dict], val: List[Dict], test: List[Dict]) -> None:
+def assert_no_data_leakage(
+    train: List[Dict], val: List[Dict], test: List[Dict]
+) -> None:
     """Raise AssertionError if any image path appears in more than one split."""
     train_paths = {r["image_path"] for r in train}
     val_paths = {r["image_path"] for r in val}
@@ -342,19 +391,24 @@ def assert_no_data_leakage(train: List[Dict], val: List[Dict], test: List[Dict])
     unique = len(train_paths | val_paths | test_paths)
     assert total == unique, f"Duplicate images detected: {total} vs {unique} unique"
 
-    print(f"✓ No data leakage detected. "
-          f"Train={len(train_paths)}, Val={len(val_paths)}, Test={len(test_paths)}")
+    print(
+        f"✓ No data leakage detected. "
+        f"Train={len(train_paths)}, Val={len(val_paths)}, Test={len(test_paths)}"
+    )
 
 
 # ---------------------------------------------------------------------------
 # 5. Visualisation Helpers
 # ---------------------------------------------------------------------------
 
-def make_comparison_grid(clean_imgs: List[np.ndarray],
-                         degraded_imgs: List[np.ndarray],
-                         n: int = 5,
-                         target_h: int = 128,
-                         target_w: int = 512) -> np.ndarray:
+
+def make_comparison_grid(
+    clean_imgs: List[np.ndarray],
+    degraded_imgs: List[np.ndarray],
+    n: int = 5,
+    target_h: int = 128,
+    target_w: int = 512,
+) -> np.ndarray:
     """
     Build a side-by-side grid: left = clean, right = degraded.
     Returns a single image (numpy array) ready for display.
