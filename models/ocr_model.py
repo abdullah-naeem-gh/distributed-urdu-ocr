@@ -35,9 +35,9 @@ class CNNBackbone(nn.Module):
       - Spatial resolution preserved in Conv layers via padding=1
       - Output: (batch, seq_len, d_model)
 
-    For input (B, 1, 128, 512):
+    For input (B, 1, 128, 2048):
       Height: 128 → pooled down to 1 (7 vertical reductions)
-      Width:  512 → pooled to 128 (2 horizontal reductions)
+      Width:  2048 → pooled to 128 (4 horizontal reductions)
       → seq_len=128, d_model=256
     """
 
@@ -60,17 +60,17 @@ class CNNBackbone(nn.Module):
             nn.LeakyReLU(inplace=True),
             nn.MaxPool2d(kernel_size=(2, 2)),
 
-            # Block 3: → pool (2,1) → (B, 128, 16, 128)
+            # Block 3: → pool (2,2) → (B, 128, 16, 64)
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.LeakyReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=(2, 1)),
+            nn.MaxPool2d(kernel_size=(2, 2)),
 
-            # Block 4: → pool (2,1) → (B, 128, 8, 128)
+            # Block 4: → pool (2,2) → (B, 128, 8, 32)
             nn.Conv2d(128, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.LeakyReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=(2, 1)),
+            nn.MaxPool2d(kernel_size=(2, 2)),
 
             # Block 5: → pool (2,1) → (B, 256, 4, 128)
             nn.Conv2d(128, d_model, kernel_size=3, padding=1),

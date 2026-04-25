@@ -219,7 +219,7 @@ def standardize_image(img: np.ndarray, target_height: int = 128) -> np.ndarray:
 def standardize_and_pad(
     img: np.ndarray,
     target_height: int = 128,
-    target_width: int = 512,
+    target_width: int = 2048,
     pad_value: int = 255,
 ) -> np.ndarray:
     """

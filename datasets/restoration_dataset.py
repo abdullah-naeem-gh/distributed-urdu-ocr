@@ -33,7 +33,7 @@ class RestorationDataset(Dataset):
         self,
         csv_path: str,
         target_height: int = 128,
-        target_width: int = 512,
+        target_width: int = 2048,
         deterministic_degradation: bool = False,
         base_seed: int = 42,
         max_samples: Optional[int] = None,
@@ -83,7 +83,7 @@ class RestorationDataset(Dataset):
 def get_dataloaders(
     splits_dir: str = "splits",
     target_height: int = 128,
-    target_width: int = 512,
+    target_width: int = 2048,
     batch_size: int = 8,
     num_workers: int = 0,
     max_train_samples: Optional[int] = None,

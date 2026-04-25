@@ -102,7 +102,8 @@ class OCRTrainer:
         self.optimizer = torch.optim.Adam(
             model.parameters(), lr=lr, betas=betas, eps=eps
         )
-        self.criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
+        # Use reduction='none' so we can apply per-sample weights
+        self.criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX, reduction="none")
 
         self.history: Dict[str, List[float]] = {
             "train_loss": [],
@@ -111,15 +112,44 @@ class OCRTrainer:
             "val_wer": [],
         }
 
+    def _weighted_loss(
+        self,
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        weights: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Compute per-sample weighted cross-entropy loss.
+
+        Args:
+            logits: (B, T, V)
+            targets: (B, T)
+            weights: (B,) — per-sample multipliers (e.g. 3.0 for UHWR)
+        """
+        B, T, V = logits.shape
+        # (B*T, V) vs (B*T,)
+        per_token_loss = self.criterion(
+            logits.reshape(B * T, V), targets.reshape(B * T)
+        )  # (B*T,)
+        per_token_loss = per_token_loss.reshape(B, T)  # (B, T)
+
+        # Mask: count non-pad tokens per sample
+        non_pad = (targets != PAD_IDX).float()  # (B, T)
+        # Average loss per sample, then weight
+        sample_loss = (per_token_loss * non_pad).sum(dim=1) / non_pad.sum(dim=1).clamp(min=1)  # (B,)
+        weighted = sample_loss * weights  # (B,)
+        return weighted.mean()
+
     def train_epoch(self, train_loader: DataLoader) -> float:
         """Run one training epoch. Returns average loss."""
         self.model.train()
         total_loss = 0.0
         count = 0
 
-        for images, labels, lengths in train_loader:
+        for images, labels, lengths, weights in train_loader:
             images = images.to(self.device)
             labels = labels.to(self.device)
+            weights = weights.to(self.device)
 
             # Teacher forcing: input = labels[:, :-1], target = labels[:, 1:]
             tgt_input = labels[:, :-1]
@@ -128,12 +158,7 @@ class OCRTrainer:
             self.optimizer.zero_grad()
             logits = self.model(images, tgt_input)  # (B, tgt_len, vocab)
 
-            # Flatten for cross-entropy
-            B, T, V = logits.shape
-            loss = self.criterion(
-                logits.reshape(B * T, V),
-                tgt_output.reshape(B * T),
-            )
+            loss = self._weighted_loss(logits, tgt_output, weights)
             loss.backward()
 
             # Gradient clipping for stability
@@ -141,6 +166,7 @@ class OCRTrainer:
 
             self.optimizer.step()
 
+            B = images.size(0)
             total_loss += loss.item() * B
             count += B
 
@@ -181,19 +207,17 @@ class OCRTrainer:
         all_preds = []
         all_refs = []
 
-        for images, labels, lengths in val_loader:
+        for images, labels, lengths, weights in val_loader:
             images = images.to(self.device)
             labels = labels.to(self.device)
+            weights = weights.to(self.device)
 
             # Compute loss
             tgt_input = labels[:, :-1]
             tgt_output = labels[:, 1:]
             logits = self.model(images, tgt_input)
-            B, T, V = logits.shape
-            loss = self.criterion(
-                logits.reshape(B * T, V),
-                tgt_output.reshape(B * T),
-            )
+            loss = self._weighted_loss(logits, tgt_output, weights)
+            B = images.size(0)
             total_loss += loss.item() * B
             count += B
 
