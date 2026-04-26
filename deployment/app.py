@@ -35,9 +35,11 @@ def run_mapreduce_job(job_id: str, input_manifest_hdfs: str, output_hdfs: str):
     
     cmd = [
         "hadoop", "jar", HADOOP_STREAMING_JAR,
-        "-files", "/app/deployment/mapper.py,/app/deployment/reducer.py,/app/deployment/line_segmenter.py",
-        "-mapper", "python3 mapper.py",
-        "-reducer", "python3 reducer.py",
+        "-files", "/app/deployment/mapper.py#mapper.py,/app/deployment/reducer.py#reducer.py,/app/deployment/line_segmenter.py#line_segmenter.py",
+        "-cmdenv", "PATH=/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "-cmdenv", "PYTHONPATH=/app",
+        "-mapper", "/opt/conda/bin/python3 mapper.py",
+        "-reducer", "/opt/conda/bin/python3 reducer.py",
         "-input", input_manifest_hdfs,
         "-output", output_hdfs
     ]
@@ -100,10 +102,17 @@ async def process_batch(background_tasks: BackgroundTasks, file: UploadFile = Fi
     with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_dir)
         
-    # Get image files
-    image_files = [f for f in os.listdir(extract_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    # Get image files recursively
+    image_files = []
+    for root, dirs, files in os.walk(extract_dir):
+        for f in files:
+            if f.lower().endswith(('.png', '.jpg', '.jpeg')):
+                # Store path relative to extract_dir for HDFS organization
+                rel_path = os.path.relpath(os.path.join(root, f), extract_dir)
+                image_files.append(rel_path)
+
     if not image_files:
-        raise HTTPException(status_code=400, detail="No images found in zip.")
+        raise HTTPException(status_code=400, detail="No images found in zip (checked recursively).")
         
     # Create HDFS directories
     hdfs_input_dir = f"/input/{job_id}"
@@ -111,9 +120,12 @@ async def process_batch(background_tasks: BackgroundTasks, file: UploadFile = Fi
     
     # Upload images to HDFS and create manifest
     manifest_lines = []
-    for img in image_files:
-        local_img_path = os.path.join(extract_dir, img)
-        hdfs_img_path = f"{hdfs_input_dir}/{img}"
+    for rel_img_path in image_files:
+        local_img_path = os.path.join(extract_dir, rel_img_path)
+        # Flatten the structure in HDFS or keep it? 
+        # For simplicity in mapper, we'll flatten it by replacing slashes
+        hdfs_filename = rel_img_path.replace(os.sep, "_")
+        hdfs_img_path = f"{hdfs_input_dir}/{hdfs_filename}"
         hdfs_client.upload_file(local_img_path, hdfs_img_path)
         manifest_lines.append(hdfs_img_path)
         

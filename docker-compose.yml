@@ -7,7 +7,7 @@ services:
     restart: always
     ports:
       - 9870:9870
-      - 9000:9000
+      - 8020:8020
     volumes:
       - hadoop_namenode:/hadoop/dfs/name
     environment:
@@ -37,7 +37,7 @@ services:
     container_name: resourcemanager
     restart: always
     environment:
-      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864"
+      SERVICE_PRECONDITION: "namenode:8020 namenode:9870 datanode:9864"
     env_file:
       - ./deployment/hadoop.env
     ports:
@@ -46,10 +46,10 @@ services:
   nodemanager:
     build: 
       context: .
-      dockerfile: deployment/Dockerfile.hadoop
+      dockerfile: deployment/Dockerfile.nodemanager
     restart: always
     environment:
-      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+      SERVICE_PRECONDITION: "namenode:8020 namenode:9870 datanode:9864 resourcemanager:8088"
       OCR_MODE: "mock" # Set to real for actual inference
     env_file:
       - ./deployment/hadoop.env
@@ -64,7 +64,7 @@ services:
     container_name: historyserver
     restart: always
     environment:
-      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+      SERVICE_PRECONDITION: "namenode:8020 namenode:9870 datanode:9864 resourcemanager:8088"
     env_file:
       - ./deployment/hadoop.env
     volumes:
@@ -81,7 +81,7 @@ services:
     ports:
       - 8000:8000
     environment:
-      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 resourcemanager:8088"
+      SERVICE_PRECONDITION: "namenode:8020 namenode:9870 resourcemanager:8088"
       OCR_MODE: "mock" # Set to real for actual inference
     env_file:
       - ./deployment/hadoop.env

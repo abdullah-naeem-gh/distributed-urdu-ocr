@@ -6,10 +6,14 @@ import time
 import subprocess
 import socket
 
-# Add the parent directory to sys.path so we can import from models/ and deployment/
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Ensure CWD is in path
+sys.path.append(os.getcwd())
 
-from deployment import line_segmenter
+# Add /app to sys.path for models/ and preprocessing.py when running in Docker
+sys.path.append("/app")
+
+# line_segmenter.py is shipped via -files, so it's in the CWD
+import line_segmenter
 
 OCR_MODE = os.environ.get("OCR_MODE", "mock").lower()
 NODE_NAME = socket.gethostname()
@@ -39,7 +43,7 @@ def process_image(hdfs_path):
     
     try:
         # Download image from HDFS
-        subprocess.run(["hdfs", "dfs", "-get", "-f", hdfs_path, local_path], check=True, stderr=subprocess.PIPE)
+        subprocess.run(["/opt/hadoop-3.2.1/bin/hdfs", "dfs", "-get", "-f", hdfs_path, local_path], check=True, stderr=subprocess.PIPE)
         
         # Segment into lines
         line_images = line_segmenter.segment_lines(local_path)

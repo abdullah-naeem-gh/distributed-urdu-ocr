@@ -13,8 +13,10 @@ def run_hdfs_cmd(cmd_list):
         )
         return result.stdout
     except subprocess.CalledProcessError as e:
-        print(f"HDFS Error: {e.stderr}")
-        raise
+        error_msg = f"HDFS Error: {e.stderr}"
+        print(error_msg)
+        # Raise with the full error message
+        raise Exception(error_msg) from e
 
 def mkdir(hdfs_path):
     """Create a directory in HDFS (like mkdir -p)."""
