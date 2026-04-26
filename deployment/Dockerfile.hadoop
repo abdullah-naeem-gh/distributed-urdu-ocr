@@ -1,0 +1,29 @@
+FROM bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+
+USER root
+
+# Install Python and dependencies
+RUN apt-get update && \
+    apt-get install -y python3 python3-pip libgl1-mesa-glx libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set python3 as default
+RUN ln -s /usr/bin/python3 /usr/bin/python || true
+
+# We will install heavy dependencies using pip
+# Using a requirements list directly here to avoid copying files just for this step
+RUN pip3 install --no-cache-dir \
+    torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu \
+    opencv-python==4.13.0.92 \
+    numpy==2.4.3 \
+    pandas==3.0.2 \
+    scikit-learn==1.8.0
+
+# Set working directory
+WORKDIR /app
+
+# The code will be mounted or copied here, but models and preprocessing
+# should be available to the python path
+ENV PYTHONPATH="${PYTHONPATH}:/app"
+
+USER root

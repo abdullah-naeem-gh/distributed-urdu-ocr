@@ -1,0 +1,97 @@
+version: "3"
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    restart: always
+    ports:
+      - 9870:9870
+      - 9000:9000
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+    environment:
+      - CLUSTER_NAME=test
+    env_file:
+      - ./deployment/hadoop.env
+
+  datanode:
+    build: 
+      context: .
+      dockerfile: deployment/Dockerfile.hadoop
+    restart: always
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+      - ./checkpoints:/app/checkpoints:ro
+      - ./models:/app/models:ro
+      - ./deployment:/app/deployment:ro
+      - ./preprocessing.py:/app/preprocessing.py:ro
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+      OCR_MODE: "mock" # Set to real for actual inference
+    env_file:
+      - ./deployment/hadoop.env
+
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+    container_name: resourcemanager
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864"
+    env_file:
+      - ./deployment/hadoop.env
+    ports:
+      - 8088:8088
+
+  nodemanager:
+    build: 
+      context: .
+      dockerfile: deployment/Dockerfile.hadoop
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+      OCR_MODE: "mock" # Set to real for actual inference
+    env_file:
+      - ./deployment/hadoop.env
+    volumes:
+      - ./checkpoints:/app/checkpoints:ro
+      - ./models:/app/models:ro
+      - ./deployment:/app/deployment:ro
+      - ./preprocessing.py:/app/preprocessing.py:ro
+
+  historyserver:
+    image: bde2020/hadoop-historyserver:2.0.0-hadoop3.2.1-java8
+    container_name: historyserver
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+    env_file:
+      - ./deployment/hadoop.env
+    volumes:
+      - hadoop_historyserver:/hadoop/yarn/timeline
+    ports:
+      - 8188:8188
+
+  fastapi:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile.fastapi
+    container_name: fastapi
+    restart: always
+    ports:
+      - 8000:8000
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 resourcemanager:8088"
+      OCR_MODE: "mock" # Set to real for actual inference
+    env_file:
+      - ./deployment/hadoop.env
+    volumes:
+      - ./deployment:/app/deployment
+      - ./checkpoints:/app/checkpoints:ro
+      - ./models:/app/models:ro
+      - ./preprocessing.py:/app/preprocessing.py:ro
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+  hadoop_historyserver:
