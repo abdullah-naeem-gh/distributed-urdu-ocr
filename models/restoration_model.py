@@ -20,6 +20,8 @@ from torch.utils.data import DataLoader
 
 import segmentation_models_pytorch as smp
 
+from models.checkpoint_utils import extract_state_dict, strip_module_prefix
+
 
 # ---------------------------------------------------------------------------
 # 1. Model Factory
@@ -248,9 +250,15 @@ def load_restoration_model(
 ) -> nn.Module:
     """Load a trained restoration model from a checkpoint file."""
     model = build_restoration_model(encoder_name=encoder_name, encoder_weights=None)
-    model.load_state_dict(
-        torch.load(checkpoint_path, map_location=device, weights_only=True)
-    )
+    checkpoint_obj = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    state_dict = strip_module_prefix(extract_state_dict(checkpoint_obj, checkpoint_path))
+    try:
+        model.load_state_dict(state_dict)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"Failed to load restoration checkpoint '{checkpoint_path}'. "
+            "This usually means the checkpoint does not match the expected U-Net architecture."
+        ) from exc
     model = model.to(device)
     model.eval()
     return model

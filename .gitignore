@@ -1,6 +1,8 @@
 dataset.vhdx
 DL_Project_Proposal.pdf
 .env
+deployment/hadoop/hadoop.env
+deployment/hadoop/.env
 .agent/
 .vscode/
 .aiexclude
@@ -12,3 +14,4 @@ explore.py
 explore2.py
 checkpoints/
 .claude/
+deployment/hadoop/hadoop.env

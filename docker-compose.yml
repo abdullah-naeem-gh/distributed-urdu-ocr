@@ -15,13 +15,29 @@ services:
     env_file:
       - ./deployment/hadoop/hadoop.env
 
-  datanode:
+  datanode1:
     build: 
       context: .
       dockerfile: deployment/hadoop/Dockerfile.hadoop
+    container_name: datanode1
     restart: always
     volumes:
-      - hadoop_datanode:/hadoop/dfs/data
+      - hadoop_datanode1:/hadoop/dfs/data
+      - ./deployment/hadoop:/app/deployment/hadoop:ro
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+      OCR_MODE: "real"
+    env_file:
+      - ./deployment/hadoop/hadoop.env
+
+  datanode2:
+    build: 
+      context: .
+      dockerfile: deployment/hadoop/Dockerfile.hadoop
+    container_name: datanode2
+    restart: always
+    volumes:
+      - hadoop_datanode2:/hadoop/dfs/data
       - ./deployment/hadoop:/app/deployment/hadoop:ro
     environment:
       SERVICE_PRECONDITION: "namenode:9870"
@@ -34,7 +50,7 @@ services:
     container_name: resourcemanager
     restart: always
     environment:
-      SERVICE_PRECONDITION: "namenode:8020 namenode:9870 datanode:9864"
+      SERVICE_PRECONDITION: "namenode:8020 namenode:9870 datanode1:9864 datanode2:9864"
     env_file:
       - ./deployment/hadoop/hadoop.env
     ports:
@@ -44,14 +60,17 @@ services:
     build: 
       context: .
       dockerfile: deployment/hadoop/Dockerfile.nodemanager
+    deploy:
+      mode: replicated
+      replicas: 2
     restart: always
     environment:
-      SERVICE_PRECONDITION: "namenode:8020 namenode:9870 datanode:9864 resourcemanager:8088"
+      SERVICE_PRECONDITION: "namenode:8020 namenode:9870 datanode1:9864 datanode2:9864 resourcemanager:8088"
       OCR_MODE: "real"
       RUNPOD_ENDPOINT_ID: "z3zabzqi52jyoh"
-      RUNPOD_API_KEY: "${RUNPOD_API_KEY}"
     env_file:
       - ./deployment/hadoop/hadoop.env
+      - ./deployment/hadoop/.env
     volumes:
       - ./deployment/hadoop:/app/deployment/hadoop:ro
 
@@ -60,7 +79,7 @@ services:
     container_name: historyserver
     restart: always
     environment:
-      SERVICE_PRECONDITION: "namenode:8020 namenode:9870 datanode:9864 resourcemanager:8088"
+      SERVICE_PRECONDITION: "namenode:8020 namenode:9870 datanode1:9864 datanode2:9864 resourcemanager:8088"
     env_file:
       - ./deployment/hadoop/hadoop.env
     volumes:
@@ -80,13 +99,15 @@ services:
       SERVICE_PRECONDITION: "namenode:8020 namenode:9870 resourcemanager:8088"
       OCR_MODE: "real"
       RUNPOD_ENDPOINT_ID: "z3zabzqi52jyoh"
-      RUNPOD_API_KEY: "${RUNPOD_API_KEY}"
     env_file:
       - ./deployment/hadoop/hadoop.env
+      - ./deployment/hadoop/.env
     volumes:
       - ./deployment/hadoop:/app/deployment/hadoop
+      - ./preprocessing.py:/app/preprocessing.py:ro
 
 volumes:
   hadoop_namenode:
-  hadoop_datanode:
+  hadoop_datanode1:
+  hadoop_datanode2:
   hadoop_historyserver:

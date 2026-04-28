@@ -16,6 +16,7 @@ sys.path.append(os.getcwd())
 
 # line_segmenter.py is shipped via -files, so it's in the CWD
 import line_segmenter
+import preprocessing
 
 OCR_MODE = os.environ.get("OCR_MODE", "real").lower()
 RUNPOD_ENDPOINT_ID = os.environ.get("RUNPOD_ENDPOINT_ID", "z3zabzqi52jyoh")
@@ -23,7 +24,10 @@ RUNPOD_API_KEY = os.environ.get("RUNPOD_API_KEY")
 NODE_NAME = socket.gethostname()
 
 def encode_image(img):
-    _, buffer = cv2.imencode('.png', img)
+    # Standardize image to (128, 2048) as expected by the model pipeline
+    # The models were trained on 128px height images.
+    standardized = preprocessing.standardize_and_pad(img, target_height=128, target_width=2048)
+    _, buffer = cv2.imencode('.png', standardized)
     return base64.b64encode(buffer).decode('utf-8')
 
 def call_runpod_inference(encoded_images):

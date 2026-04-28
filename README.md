@@ -119,3 +119,8 @@ Set the RunPod worker environment:
 - `RESTORATION_CKPT=/app/checkpoints/best_restoration_model.pth`
 - `OCR_CKPT=/app/checkpoints/best_ocr_model.pth`
 - `VOCAB_PATH=/app/checkpoints/vocab.json`
+
+Notes:
+- Build with `--platform linux/amd64` for RunPod workers.
+- Keep OCR checkpoint and `vocab.json` from the same training run.
+- Loaders support raw `state_dict`, wrapped checkpoints (for example `model_state_dict`), and `module.`-prefixed keys.

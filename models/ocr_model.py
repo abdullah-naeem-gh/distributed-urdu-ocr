@@ -18,6 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from models.checkpoint_utils import extract_state_dict, strip_module_prefix
 from models.vocab import PAD_IDX, SOS_IDX, EOS_IDX
 
 
@@ -350,9 +351,15 @@ def load_ocr_model(
 ) -> ConvTransformerOCR:
     """Load a trained OCR model from a checkpoint file."""
     model = ConvTransformerOCR(vocab_size=vocab_size, d_model=d_model)
-    model.load_state_dict(
-        torch.load(checkpoint_path, map_location=device, weights_only=True)
-    )
+    checkpoint_obj = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    state_dict = strip_module_prefix(extract_state_dict(checkpoint_obj, checkpoint_path))
+    try:
+        model.load_state_dict(state_dict)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"Failed to load OCR checkpoint '{checkpoint_path}'. "
+            "This usually means model architecture or vocab size does not match inference config."
+        ) from exc
     model = model.to(device)
     model.eval()
     return model

@@ -16,7 +16,17 @@ OCR_CKPT = os.environ.get("OCR_CKPT", "/app/checkpoints/best_ocr_model.pth")
 VOCAB_PATH = os.environ.get("VOCAB_PATH", "/app/checkpoints/vocab.json")
 DEVICE = os.environ.get("DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
 
+def _describe_file(path: str) -> str:
+    if not os.path.exists(path):
+        return f"{path} (missing)"
+    size_mb = os.path.getsize(path) / (1024 * 1024)
+    return f"{path} ({size_mb:.1f} MB)"
+
+
 print(f"Loading models on {DEVICE}...")
+print(f"Restoration checkpoint: {_describe_file(RESTORATION_CKPT)}")
+print(f"OCR checkpoint: {_describe_file(OCR_CKPT)}")
+print(f"Vocab file: {_describe_file(VOCAB_PATH)}")
 pipeline = UrduOCRPipeline(
     restoration_ckpt=RESTORATION_CKPT,
     ocr_ckpt=OCR_CKPT,

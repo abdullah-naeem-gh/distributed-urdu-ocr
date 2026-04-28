@@ -32,16 +32,17 @@ HADOOP_STREAMING_JAR = "/opt/hadoop-3.2.1/share/hadoop/tools/lib/hadoop-streamin
 def run_mapreduce_job(job_id: str, input_manifest_hdfs: str, output_hdfs: str):
     """Run the MapReduce job in a background thread."""
     JOBS_STORE[job_id]["state"] = "SUBMITTED"
+    JOBS_STORE[job_id]["error"] = None
     
     cmd = [
         "hadoop", "jar", HADOOP_STREAMING_JAR,
         "-D", "mapreduce.task.timeout=0",
-        "-files", "/app/deployment/hadoop/mapper.py#mapper.py,/app/deployment/hadoop/reducer.py#reducer.py,/app/deployment/hadoop/line_segmenter.py#line_segmenter.py",
+        "-files", "/app/deployment/hadoop/mapper.py#mapper.py,/app/deployment/hadoop/reducer.py#reducer.py,/app/deployment/hadoop/line_segmenter.py#line_segmenter.py,/app/preprocessing.py#preprocessing.py",
         "-cmdenv", "PATH=/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "-cmdenv", "PYTHONPATH=/app",
-        "-cmdenv", f"OCR_MODE={os.environ.get('OCR_MODE', 'real')}",
-        "-cmdenv", f"RUNPOD_ENDPOINT_ID={os.environ.get('RUNPOD_ENDPOINT_ID', 'z3zabzqi52jyoh')}",
         "-cmdenv", f"RUNPOD_API_KEY={os.environ.get('RUNPOD_API_KEY')}",
+        "-cmdenv", f"RUNPOD_ENDPOINT_ID={os.environ.get('RUNPOD_ENDPOINT_ID', 'z3zabzqi52jyoh')}",
+        "-cmdenv", f"OCR_MODE={os.environ.get('OCR_MODE', 'real')}",
         "-mapper", "/opt/conda/bin/python3 mapper.py",
         "-reducer", "/opt/conda/bin/python3 reducer.py",
         "-input", input_manifest_hdfs,
@@ -56,10 +57,12 @@ def run_mapreduce_job(job_id: str, input_manifest_hdfs: str, output_hdfs: str):
             stderr=subprocess.PIPE,
             text=True
         )
+        stderr_lines = []
         
         # Parse stderr to find the YARN application ID
         # e.g., "Submitted application application_162000000_0001"
         for line in process.stderr:
+            stderr_lines.append(line.rstrip())
             if "Submitted application application_" in line:
                 app_id = line.strip().split(" ")[-1]
                 JOBS_STORE[job_id]["app_id"] = app_id
@@ -74,9 +77,12 @@ def run_mapreduce_job(job_id: str, input_manifest_hdfs: str, output_hdfs: str):
             JOBS_STORE[job_id]["progress"] = 100
         else:
             JOBS_STORE[job_id]["state"] = "FAILED"
+            if stderr_lines:
+                JOBS_STORE[job_id]["error"] = "\n".join(stderr_lines[-30:])
             
     except Exception as e:
         JOBS_STORE[job_id]["state"] = "FAILED"
+        JOBS_STORE[job_id]["error"] = str(e)
         print(f"Job {job_id} failed: {str(e)}")
 
 @app.post("/api/process-batch")
@@ -89,7 +95,8 @@ async def process_batch(background_tasks: BackgroundTasks, file: UploadFile = Fi
         "state": "UPLOADING_TO_HDFS",
         "app_id": None,
         "nodes": [],
-        "progress": 0
+        "progress": 0,
+        "error": None,
     }
     
     # Create local temp dir

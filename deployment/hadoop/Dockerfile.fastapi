@@ -25,5 +25,9 @@ WORKDIR /app
 
 ENV PYTHONPATH="${PYTHONPATH}:/app:/app/deployment/hadoop"
 
+# Hadoop streaming submission in app.py ships preprocessing.py via -files.
+# Keep a copy in the image so the path exists even when only deployment/hadoop is mounted.
+COPY preprocessing.py /app/preprocessing.py
+
 # Command to run FastAPI
 CMD ["uvicorn", "deployment.hadoop.app:app", "--host", "0.0.0.0", "--port", "8000"]
