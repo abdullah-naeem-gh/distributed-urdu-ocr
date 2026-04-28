@@ -11,7 +11,7 @@ The system is trained on a combination of printed Nastaleeq text (`MMU-OCR-21`) 
 - **Phase 2: Deep Learning Image Restoration (U-Net)** — **[COMPLETED]**
 - **Phase 3: Deep Learning OCR (Conv-Transformer)** — **[COMPLETED]**
 - **Phase 4: Pipeline Integration, Metrics & Visualization** — **[COMPLETED]**
-- **Phase 5: Real-world Application / Deployment** — *[PENDING]*
+- **Phase 5: Real-world Application / Deployment** — **[COMPLETED]**
 
 ---
 
@@ -98,8 +98,68 @@ python -m ipykernel install --user --name=torch-env --display-name "Python (torc
 
 ---
 
-## 📌 Next Steps
-With Phases 1-4 complete, the upcoming objective is **Phase 5** (wrapping the dual-model pipeline into a FastAPI deployment and setting up distributed processing scaling).
+## 🚢 Running the Backend Server (Local, No Docker)
+
+The FastAPI server exposes both the Hadoop-backed endpoints (`/api/...`) and the direct RunPod endpoints (`/api/DL/...`). To run locally without Docker:
+
+**1. Configure credentials** — edit `deployment/hadoop/.env`:
+```
+RUNPOD_API_KEY=<your key>
+RUNPOD_ENDPOINT_ID=<your endpoint id>
+```
+
+**2. Create venv, install dependencies, and start the server:**
+```bash
+# From the project root
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+
+cd deployment/hadoop
+PYTHONPATH=../.. python -m uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+The server starts at `http://localhost:8000`. Interactive API docs are available at `http://localhost:8000/docs`.
+
+**DL endpoints (no Hadoop required):**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/DL/process-batch` | Upload a `.zip` of images; returns `job_id` |
+| `GET`  | `/api/DL/jobs/{job_id}/status` | Poll job state and progress |
+| `GET`  | `/api/DL/jobs/{job_id}/results` | Fetch recognized text per image |
+
+**Optional env vars for tuning:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OCR_MODE` | `real` | Set to `mock` to skip RunPod calls during testing |
+| `DL_MAX_WORKERS` | `4` | Parallel document threads |
+| `DL_RUNPOD_TIMEOUT_SECONDS` | `120` | Max wait per RunPod job |
+| `DL_RUNPOD_POLL_INTERVAL_SECONDS` | `2` | Polling interval |
+| `DL_RUNPOD_MAX_RETRIES` | `3` | Retries on transient API errors |
+
+**Example request:**
+```bash
+curl -X POST http://localhost:8000/api/DL/process-batch \
+  -F "file=@test_batch.zip"
+# returns: {"job_id": "dl-a1b2c3d4", "message": "Batch processing started."}
+
+curl http://localhost:8000/api/DL/jobs/dl-a1b2c3d4/status
+curl http://localhost:8000/api/DL/jobs/dl-a1b2c3d4/results
+```
+
+---
+
+## 🐳 Running with Docker (Full Hadoop Cluster)
+
+```bash
+docker-compose up --build
+```
+
+Services: FastAPI on `:8000`, YARN RM UI on `:8088`, HDFS NameNode UI on `:9870`, History Server on `:8188`.
+
+---
 
 ## RunPod Serverless Inference
 

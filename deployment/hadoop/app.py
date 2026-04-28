@@ -6,11 +6,21 @@ import threading
 import time
 import requests
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any
 
+# Load .env so the server can be started directly with `uvicorn` outside Docker
+try:
+    from dotenv import load_dotenv
+    _env_path = os.path.join(os.path.dirname(__file__), ".env")
+    load_dotenv(_env_path)
+except ImportError:
+    pass
+
 import hdfs_client
+from dl_worker import process_image_file
 
 app = FastAPI(title="Distributed Urdu OCR API")
 
@@ -243,3 +253,118 @@ def get_cluster_info():
         }
     except Exception:
         return {"status": "unavailable"}
+
+
+# ---------------------------------------------------------------------------
+# DL endpoints — parallel RunPod inference, no Hadoop
+# ---------------------------------------------------------------------------
+
+DL_JOBS_STORE: Dict[str, Dict[str, Any]] = {}
+_DL_MAX_WORKERS = int(os.environ.get("DL_MAX_WORKERS", "4"))
+
+
+def _run_dl_job(job_id: str, image_paths: list):
+    store = DL_JOBS_STORE[job_id]
+    store["state"] = "PROCESSING"
+    total = len(image_paths)
+    results = [None] * total
+
+    try:
+        with ThreadPoolExecutor(max_workers=_DL_MAX_WORKERS) as pool:
+            futures = {pool.submit(process_image_file, p): i for i, p in enumerate(image_paths)}
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as exc:
+                    results[idx] = {
+                        "filename": os.path.basename(image_paths[idx]),
+                        "lines": [],
+                        "error": str(exc),
+                        "processing_time_ms": 0,
+                        "num_lines_detected": 0,
+                    }
+                store["completed"] += 1
+                store["progress"] = int(store["completed"] / total * 100)
+
+        store["results"] = results
+        store["state"] = "SUCCEEDED"
+    except Exception as exc:
+        store["state"] = "FAILED"
+        store["error"] = str(exc)
+    finally:
+        store["end_time"] = time.time()
+        # Clean up extracted images from /tmp
+        tmp_dir = store.get("_tmp_dir")
+        if tmp_dir and os.path.isdir(tmp_dir):
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@app.post("/api/DL/process-batch")
+async def dl_process_batch(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    if not file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Only .zip files are supported.")
+
+    job_id = "dl-" + str(uuid.uuid4())[:8]
+    tmp_dir = f"/tmp/{job_id}"
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    zip_path = os.path.join(tmp_dir, "upload.zip")
+    with open(zip_path, "wb") as f:
+        f.write(await file.read())
+
+    extract_dir = os.path.join(tmp_dir, "images")
+    os.makedirs(extract_dir, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(extract_dir)
+
+    image_paths = []
+    for root, _, files in os.walk(extract_dir):
+        for fname in files:
+            if fname.lower().endswith((".png", ".jpg", ".jpeg")):
+                image_paths.append(os.path.join(root, fname))
+
+    if not image_paths:
+        raise HTTPException(status_code=400, detail="No images found in zip.")
+
+    DL_JOBS_STORE[job_id] = {
+        "state": "UPLOADING",
+        "progress": 0,
+        "completed": 0,
+        "total": len(image_paths),
+        "results": None,
+        "error": None,
+        "start_time": time.time(),
+        "end_time": None,
+        "_tmp_dir": tmp_dir,
+    }
+
+    background_tasks.add_task(_run_dl_job, job_id, image_paths)
+    return {"job_id": job_id, "message": "Batch processing started."}
+
+
+@app.get("/api/DL/jobs/{job_id}/status")
+def dl_job_status(job_id: str):
+    if job_id not in DL_JOBS_STORE:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = DL_JOBS_STORE[job_id]
+    return {
+        "state": job["state"],
+        "progress": job["progress"],
+        "completed": job["completed"],
+        "total": job["total"],
+        "error": job["error"],
+        "start_time": job["start_time"],
+        "end_time": job["end_time"],
+    }
+
+
+@app.get("/api/DL/jobs/{job_id}/results")
+def dl_job_results(job_id: str):
+    if job_id not in DL_JOBS_STORE:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = DL_JOBS_STORE[job_id]
+    if job["state"] != "SUCCEEDED":
+        raise HTTPException(status_code=400, detail="Job has not finished successfully yet.")
+    return {"results": job["results"]}

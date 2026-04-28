@@ -56,7 +56,7 @@ wcwidth==0.6.0
 matplotlib
 opencv-python
 pandas
-dotenv
+python-dotenv
 scikit-learn
 
 segmentation-models-pytorch
