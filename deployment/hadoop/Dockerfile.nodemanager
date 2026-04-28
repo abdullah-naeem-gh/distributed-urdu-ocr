@@ -17,13 +17,10 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-py39_4.12.0-Linux-x86_64
 
 ENV PATH="/opt/conda/bin:${PATH}"
 
-# Install heavy dependencies using pip
-RUN pip install --no-cache-dir \
-    torch==2.5.1 torchvision==0.20.1 --extra-index-url https://download.pytorch.org/whl/cpu \
-    opencv-python-headless \
-    numpy \
-    pandas \
-    scikit-learn
+# Install heavy dependencies using pip in chunks for reliability
+RUN pip install --no-cache-dir requests numpy
+RUN pip install --no-cache-dir pandas scikit-learn
+RUN pip install --no-cache-dir opencv-python-headless
 
 WORKDIR /app
 ENV PYTHONPATH="${PYTHONPATH}:/app"

@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir fastapi==0.111.0 uvicorn[standard]==0.30.1 python
 
 WORKDIR /app
 
-ENV PYTHONPATH="${PYTHONPATH}:/app"
+ENV PYTHONPATH="${PYTHONPATH}:/app:/app/deployment/hadoop"
 
 # Command to run FastAPI
-CMD ["uvicorn", "deployment.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "deployment.hadoop.app:app", "--host", "0.0.0.0", "--port", "8000"]

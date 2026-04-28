@@ -248,7 +248,9 @@ def load_restoration_model(
 ) -> nn.Module:
     """Load a trained restoration model from a checkpoint file."""
     model = build_restoration_model(encoder_name=encoder_name, encoder_weights=None)
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    model.load_state_dict(
+        torch.load(checkpoint_path, map_location=device, weights_only=True)
+    )
     model = model.to(device)
     model.eval()
     return model

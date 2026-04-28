@@ -100,3 +100,22 @@ python -m ipykernel install --user --name=torch-env --display-name "Python (torc
 
 ## 📌 Next Steps
 With Phases 1-4 complete, the upcoming objective is **Phase 5** (wrapping the dual-model pipeline into a FastAPI deployment and setting up distributed processing scaling).
+
+## RunPod Serverless Inference
+
+Use the serverless inference image in `deployment/inference/`:
+
+```bash
+docker buildx build \
+  --platform linux/amd64 \
+  -f deployment/inference/Dockerfile \
+  -t <registry>/<repo>:runpod-serverless \
+  --push .
+```
+
+Set the RunPod worker environment:
+
+- `DEVICE=cuda`
+- `RESTORATION_CKPT=/app/checkpoints/best_restoration_model.pth`
+- `OCR_CKPT=/app/checkpoints/best_ocr_model.pth`
+- `VOCAB_PATH=/app/checkpoints/vocab.json`

@@ -10,7 +10,7 @@ from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any
 
-from deployment import hdfs_client
+import hdfs_client
 
 app = FastAPI(title="Distributed Urdu OCR API")
 
@@ -35,9 +35,13 @@ def run_mapreduce_job(job_id: str, input_manifest_hdfs: str, output_hdfs: str):
     
     cmd = [
         "hadoop", "jar", HADOOP_STREAMING_JAR,
-        "-files", "/app/deployment/mapper.py#mapper.py,/app/deployment/reducer.py#reducer.py,/app/deployment/line_segmenter.py#line_segmenter.py",
+        "-D", "mapreduce.task.timeout=0",
+        "-files", "/app/deployment/hadoop/mapper.py#mapper.py,/app/deployment/hadoop/reducer.py#reducer.py,/app/deployment/hadoop/line_segmenter.py#line_segmenter.py",
         "-cmdenv", "PATH=/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "-cmdenv", "PYTHONPATH=/app",
+        "-cmdenv", f"OCR_MODE={os.environ.get('OCR_MODE', 'real')}",
+        "-cmdenv", f"RUNPOD_ENDPOINT_ID={os.environ.get('RUNPOD_ENDPOINT_ID', 'z3zabzqi52jyoh')}",
+        "-cmdenv", f"RUNPOD_API_KEY={os.environ.get('RUNPOD_API_KEY')}",
         "-mapper", "/opt/conda/bin/python3 mapper.py",
         "-reducer", "/opt/conda/bin/python3 reducer.py",
         "-input", input_manifest_hdfs,
@@ -176,7 +180,7 @@ def get_job_results(job_id: str):
     if job_id not in JOBS_STORE:
         raise HTTPException(status_code=404, detail="Job not found")
         
-    if JOBS_STORE[job_id]["state"] != "SUCCEEDED":
+    if JOBS_STORE[job_id]["state"] not in ["SUCCEEDED", "FINISHED"]:
         raise HTTPException(status_code=400, detail="Job has not finished successfully yet.")
         
     hdfs_output_dir = f"/output/{job_id}"

@@ -17,8 +17,6 @@ from typing import List, Tuple, Optional, Dict
 
 import cv2
 import numpy as np
-import pandas as pd
-from sklearn.model_selection import train_test_split
 
 
 # ---------------------------------------------------------------------------
@@ -31,6 +29,8 @@ def discover_mmu_ocr21(dataset_root: str, level: str = "TextLines") -> List[Dict
     Walk MMU-OCR-21 and return a list of dicts:
       {"image_path": str, "label": str, "source": "MMU-OCR-21", "font": "Nastaleeq"}
     """
+    import pandas as pd
+
     base = Path(dataset_root) / "MMU-OCR-21"
 
     # Map levels to their exact Nastaleeq paths
@@ -355,6 +355,8 @@ def split_dataset(
     Split records into train / val / test with deterministic seeding.
     Returns (train, val, test) lists.
     """
+    from sklearn.model_selection import train_test_split
+
     assert (
         abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6
     ), "Ratios must sum to 1.0"
