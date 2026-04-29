@@ -41,9 +41,8 @@ def _get_runpod_cfg():
 # ---------------------------------------------------------------------------
 
 def encode_image(img: np.ndarray) -> str:
-    """Standardize a grayscale line image and return a base64 PNG string."""
-    standardized = preprocessing.standardize_and_pad(img, target_height=128, target_width=2048)
-    _, buf = cv2.imencode('.png', standardized)
+    """Encode a 128×2048 line image (already standardized by segment_lines) to base64 PNG."""
+    _, buf = cv2.imencode('.png', img)
     return base64.b64encode(buf).decode('utf-8')
 
 
