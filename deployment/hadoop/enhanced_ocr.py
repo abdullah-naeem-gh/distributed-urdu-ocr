@@ -5,6 +5,7 @@ reading multi-line Urdu Nastaleeq text in a single pass.
 """
 
 import base64
+import hashlib
 import os
 import time
 from typing import List, Optional
@@ -58,6 +59,10 @@ def _call_api(image_b64: str, cfg: dict) -> str:
     }
     headers = {"x-goog-api-key": cfg["api_key"]}
     resp = requests.post(url, json=payload, headers=headers, timeout=cfg["timeout_s"])
+    if not resp.ok:
+        # Surface the API's error body so we can see WHY it's failing
+        body_snippet = resp.text[:500] if resp.text else "<empty>"
+        print(f"[enhanced_ocr] {resp.status_code} response body: {body_snippet}", flush=True)
     resp.raise_for_status()
     data = resp.json()
     candidates = data.get("candidates", [])
@@ -86,7 +91,18 @@ def process_multiline_image(image_path: str, cfg: Optional[dict] = None) -> List
     last_exc: Exception = RuntimeError("unknown error")
     for attempt in range(cfg["max_retries"]):
         try:
+            with open(image_path, "rb") as _f:
+                _raw_bytes = _f.read()
+            _file_sha = hashlib.sha256(_raw_bytes).hexdigest()[:16]
             image_b64 = _encode_image_file(image_path)
+            _b64_sha = hashlib.sha256(image_b64.encode()).hexdigest()[:16]
+            print(
+                f"[enhanced_ocr] sending {os.path.basename(image_path)} "
+                f"(file_bytes={len(_raw_bytes)}, file_sha256_16={_file_sha}, "
+                f"b64_bytes={len(image_b64)}, b64_sha256_16={_b64_sha}, "
+                f"model={cfg['model']})",
+                flush=True,
+            )
             raw_text = _call_api(image_b64, cfg)
             lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
             return lines if lines else ["[No text detected]"]
