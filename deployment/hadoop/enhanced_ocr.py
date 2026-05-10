@@ -43,7 +43,7 @@ _PROMPT = (
 def _call_api(image_b64: str, cfg: dict) -> str:
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{cfg['model']}:generateContent?key={cfg['api_key']}"
+        f"{cfg['model']}:generateContent"
     )
     payload = {
         "contents": [
@@ -56,7 +56,8 @@ def _call_api(image_b64: str, cfg: dict) -> str:
         ],
         "generationConfig": {"temperature": 0.0, "maxOutputTokens": 2048},
     }
-    resp = requests.post(url, json=payload, timeout=cfg["timeout_s"])
+    headers = {"x-goog-api-key": cfg["api_key"]}
+    resp = requests.post(url, json=payload, headers=headers, timeout=cfg["timeout_s"])
     resp.raise_for_status()
     data = resp.json()
     candidates = data.get("candidates", [])
@@ -89,6 +90,14 @@ def process_multiline_image(image_path: str, cfg: Optional[dict] = None) -> List
             raw_text = _call_api(image_b64, cfg)
             lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
             return lines if lines else ["[No text detected]"]
+        except requests.exceptions.HTTPError as exc:
+            # On 429 (rate limit) or 4xx, do not retry — retrying just burns more quota
+            status = exc.response.status_code if exc.response is not None else 0
+            if 400 <= status < 500:
+                raise
+            last_exc = exc
+            if attempt < cfg["max_retries"] - 1:
+                time.sleep(2 ** attempt)
         except Exception as exc:
             last_exc = exc
             if attempt < cfg["max_retries"] - 1:
