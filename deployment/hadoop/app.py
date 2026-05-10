@@ -26,6 +26,13 @@ import line_segmenter as _line_segmenter
 from line_segmenter import _standardize_and_pad as _std_pad
 import enhanced_ocr as _enhanced_ocr
 
+# Warn at startup if the enhanced OCR key is missing
+_gemini_key = os.environ.get("ENHANCED_OCR_API_KEY") or os.environ.get("GEMINI_API_KEY")
+if _gemini_key:
+    print("[startup] Enhanced OCR API key loaded.")
+else:
+    print("[startup] WARNING: GEMINI_API_KEY / ENHANCED_OCR_API_KEY not set — enhanced OCR will fail")
+
 app = FastAPI(title="Distributed Urdu OCR API")
 
 app.add_middleware(
@@ -409,8 +416,7 @@ def _run_dl_job(job_id: str, image_paths: list, multiline: bool = True):
                         enhanced_results[fname] = None
                         _make_log(
                             logs,
-                            f"Enhanced OCR engine encountered an issue on {fname}; "
-                            "standard engine result will be used.",
+                            f"Enhanced OCR failed on {fname}: {exc}",
                             "warn",
                         )
                         store["logs"] = list(logs)
