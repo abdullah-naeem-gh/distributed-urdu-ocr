@@ -412,6 +412,9 @@ def _run_dl_job(job_id: str, image_paths: list, multiline: bool = True):
                         enhanced_results[fname] = lines
                 except Exception as exc:
                     # Enhanced engine failed — fallback will apply in reduce phase
+                    import traceback
+                    print(f"[enhanced_ocr] FAILED on {fname}: {type(exc).__name__}: {exc}", flush=True)
+                    traceback.print_exc()
                     with results_lock:
                         enhanced_results[fname] = None
                         _make_log(
