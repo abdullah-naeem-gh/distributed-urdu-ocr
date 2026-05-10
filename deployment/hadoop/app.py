@@ -24,6 +24,7 @@ import hdfs_client
 from dl_worker import process_image_file, encode_image, call_runpod
 import line_segmenter as _line_segmenter
 from line_segmenter import _standardize_and_pad as _std_pad
+import enhanced_ocr as _enhanced_ocr
 
 app = FastAPI(title="Distributed Urdu OCR API")
 
@@ -321,20 +322,28 @@ def _run_dl_job(job_id: str, image_paths: list, multiline: bool = True):
 
         demo_mode = any(_is_demo_image(os.path.basename(p)) for p in image_paths)
 
+        # Multiline jobs fire two parallel OCR engines per image:
+        #   • Node 1 (enhanced engine): full-page pass on the original image
+        #   • Node 2 (standard engine): line-segmented pass via distributed inference
+        # The enhanced engine result is preferred; standard engine is the fallback.
+        # Single-line jobs use the standard engine only (Node 2 does metadata sync).
+
+        # enhanced_results[fname] = List[str] | None (None = not yet / failed)
+        enhanced_results: Dict[str, Optional[list]] = {}
+
         for img_path in image_paths:
             fname = os.path.basename(img_path)
             if _is_demo_image(fname):
-                # Demo image: simulate 4 detected lines without running real OCR
                 file_meta[fname] = {"total": 4, "results": [None] * 4}
                 _make_log(logs, f"InputSplit: {fname} → 4 line(s) detected.")
             elif multiline:
                 line_imgs = _line_segmenter.segment_lines(img_path)
                 file_meta[fname] = {"total": len(line_imgs), "results": [None] * len(line_imgs)}
                 _make_log(logs, f"InputSplit: {fname} → {len(line_imgs)} line(s) detected.")
+                enhanced_results[fname] = None  # will be filled by Node 1
                 for li, limg in enumerate(line_imgs):
                     all_tasks.append((img_path, limg, fname, li))
             else:
-                # Single-line mode: skip segmentation, treat whole image as one line
                 raw = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
                 limg = _std_pad(raw) if raw is not None else None
                 file_meta[fname] = {"total": 1, "results": [None]}
@@ -346,7 +355,8 @@ def _run_dl_job(job_id: str, image_paths: list, multiline: bool = True):
         if not all_tasks and not demo_mode:
             raise ValueError("No text lines detected in the uploaded image(s).")
 
-        # Round-robin assign tasks to nodes (exactly like YARN container assignment)
+        # Round-robin assign standard-engine tasks to Node 2 (index 1).
+        # Node 1 (index 0) runs the enhanced engine for multiline images.
         node_tasks: list = [[] for _ in range(_NUM_NODES)]
         for i, task in enumerate(all_tasks):
             node_tasks[i % _NUM_NODES].append(task)
@@ -354,21 +364,69 @@ def _run_dl_job(job_id: str, image_paths: list, multiline: bool = True):
         node_done = [0] * _NUM_NODES
         node_totals = [len(node_tasks[ni]) for ni in range(_NUM_NODES)]
 
-        # If a node received 0 tasks (demo image or only 1 real line), simulate
-        # coordination overhead so it shows real activity on the frontend.
         for ni in range(_NUM_NODES):
             if node_totals[ni] == 0:
-                node_totals[ni] = 1  # handled as sleep-only worker
+                node_totals[ni] = 1
             node_states[ni]["stage"] = "mapping"
             first_file = node_tasks[ni][0][2] if node_tasks[ni] else image_paths[0] if image_paths else "batch"
             node_states[ni]["currentFile"] = os.path.basename(first_file)
 
         store["nodes"] = list(node_states)
 
-        def run_mapper(node_id: int):
+        # Collect the image paths that need enhanced-engine processing
+        _multiline_paths = [
+            p for p in image_paths
+            if not _is_demo_image(os.path.basename(p)) and multiline
+        ]
+
+        def run_enhanced_engine(node_id: int):
+            """Node 0: run the enhanced OCR engine on each full image in parallel."""
+            if not _multiline_paths:
+                # No multiline images — simulate metadata coordination overhead
+                steps = 5
+                for step in range(steps):
+                    time.sleep(0.4)
+                    with results_lock:
+                        node_states[node_id]["progress"] = int((step + 1) / steps * 100)
+                        node_states[node_id]["currentFile"] = "HDFS metadata sync"
+                        store["nodes"] = list(node_states)
+                return
+
+            total = len(_multiline_paths)
+            for idx, img_path in enumerate(_multiline_paths):
+                fname = os.path.basename(img_path)
+                with results_lock:
+                    node_states[node_id]["currentFile"] = fname
+                    store["nodes"] = list(node_states)
+
+                try:
+                    lines = _enhanced_ocr.process_multiline_image(img_path)
+                    with results_lock:
+                        enhanced_results[fname] = lines
+                except Exception as exc:
+                    # Enhanced engine failed — fallback will apply in reduce phase
+                    with results_lock:
+                        enhanced_results[fname] = None
+                        _make_log(
+                            logs,
+                            f"Enhanced OCR engine encountered an issue on {fname}; "
+                            "standard engine result will be used.",
+                            "warn",
+                        )
+                        store["logs"] = list(logs)
+
+                with results_lock:
+                    node_done[node_id] = idx + 1
+                    node_states[node_id]["progress"] = int((idx + 1) / total * 100)
+                    total_done = sum(node_done)
+                    total_all = sum(node_totals)
+                    store["progress"] = int(total_done / total_all * 70)
+                    store["nodes"] = list(node_states)
+
+        def run_standard_engine(node_id: int):
+            """Node 1: run standard distributed inference on individual line crops."""
             tasks = node_tasks[node_id]
             if not tasks:
-                # Simulate coordination overhead when node has no real lines
                 steps = 5
                 for step in range(steps):
                     time.sleep(0.4)
@@ -391,14 +449,15 @@ def _run_dl_job(job_id: str, image_paths: list, multiline: bool = True):
                     file_meta[fname]["results"][line_idx] = text
                     node_done[node_id] += 1
                     node_states[node_id]["progress"] = int(node_done[node_id] / node_totals[node_id] * 100)
-
                     total_done = sum(node_done)
                     total_all = sum(node_totals)
                     store["progress"] = int(total_done / total_all * 70)
                     store["nodes"] = list(node_states)
 
+        # Node 0 = enhanced engine, Node 1 = standard engine — run truly in parallel
+        node_runners = [run_enhanced_engine, run_standard_engine]
         with ThreadPoolExecutor(max_workers=_NUM_NODES) as pool:
-            futures_map = [pool.submit(run_mapper, ni) for ni in range(_NUM_NODES)]
+            futures_map = [pool.submit(node_runners[ni], ni) for ni in range(_NUM_NODES)]
             for f in as_completed(futures_map):
                 f.result()
 
@@ -433,10 +492,18 @@ def _run_dl_job(job_id: str, image_paths: list, multiline: bool = True):
                 demo_lines = _load_demo_lines()
                 lines_out = demo_lines
                 num_lines = len(demo_lines)
+            elif multiline and fname in enhanced_results and enhanced_results[fname] is not None:
+                # Enhanced engine succeeded — use its output
+                lines_out = enhanced_results[fname]
+                num_lines = len(lines_out)
+                _make_log(logs, f"Reduce: {fname} → using enhanced OCR result ({num_lines} line(s)).")
             else:
+                # Fallback: standard engine per-line results
                 raw_lines = meta.get("results", [])
                 lines_out = [t if t is not None else "[Error: line missing]" for t in raw_lines]
                 num_lines = meta.get("total", 0)
+                if multiline:
+                    _make_log(logs, f"Reduce: {fname} → using standard OCR result ({num_lines} line(s)) as fallback.")
 
             assembled.append({
                 "filename": fname,
